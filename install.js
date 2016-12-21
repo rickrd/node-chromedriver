@@ -13,71 +13,76 @@ var rimraf = require('rimraf').sync;
 var url = require('url');
 var util = require('util');
 
-var libPath = path.join(__dirname, 'lib', 'chromedriver');
+var libPath = path.join(__dirname, 'chromedriver');
+
 var cdnUrl = process.env.npm_config_chromedriver_cdnurl || process.env.CHROMEDRIVER_CDNURL || 'https://chromedriver.storage.googleapis.com';
 // adapt http://chromedriver.storage.googleapis.com/
 cdnUrl = cdnUrl.replace(/\/+$/, '');
-var downloadUrl = cdnUrl + '/%s/chromedriver_%s.zip';
-var platform = process.platform;
 
-if (platform === 'linux') {
-  if (process.arch === 'x64') {
-    platform += '64';
-  } else {
-    platform += '32';
-  }
-} else if (platform === 'darwin') {
-  if (process.arch === 'x64') {
-    platform = 'mac64';
-  } else {
-    console.log('Only Mac 64 bits supported.');
-    process.exit(1);
-  }
-} else if (platform !== 'win32') {
-  console.log('Unexpected platform or architecture:', process.platform, process.arch);
-  process.exit(1);
+exports.installFromEnv = function() {
+  var versions = Object.keys(process.env).filter(function(key) {
+    return key.startsWith('npm_package_chromedriver_versions_');
+  }).map(function(key) {
+    return process.env[key];
+  });
+  exports.install(versions);
+};
+
+exports.install = function(requiredVersions) {
+  console.log("Downloading chromedriver versions", requiredVersions);
+
+  npmconf.load(function(err, conf) {
+    if (err) {
+      console.log('Error loading npm config');
+      console.error(err);
+      process.exit(1);
+      return;
+    }
+
+    var tmpPath = findSuitableTempDirectory(conf);
+    var downloadItems = requiredVersions.map(function(version) {
+      var platform = getPlatform(version);
+      var url = util.format(cdnUrl + '/%s/chromedriver_%s.zip', version, platform);
+      var fileName = url.split('/').pop();
+      var versionDir = version.replace(/\./g, '_');
+      var downloadedFile = path.join(tmpPath, versionDir, fileName);
+      var targetPath = helper.getPathForVersion(version);
+      return {
+        url: url,
+        downloadedPath: downloadedFile,
+        targetPath: targetPath
+      };
+    });
+    var promise = kew.resolve(true);
+
+    // Start the install.
+    promise = promise.then(function () {
+      return kew.all(downloadItems.map(function(item) {
+        console.log('Downloading', item.url);
+        console.log('Saving to', item.downloadedPath);
+        var downloadDir = path.dirname(item.downloadedPath);
+        rimraf(downloadDir);
+        mkdirp.sync(downloadDir);
+
+        return kew.resolve(true)
+          .then(function() { return requestBinary(getRequestOptions(conf, item.url), item.downloadedPath); })
+          .then(function() { return extractDownload(item.downloadedPath); })
+          .then(function() { return copyIntoPlace(downloadDir, path.dirname(item.targetPath)); })
+          .then(function() { return fixFilePermissions(item.targetPath); });
+      }));
+    })
+    .then(function () {
+      console.log('Done. ChromeDriver binaries available at:');
+      downloadItems.forEach(function(item) {
+        console.log(' => ' + item.targetPath);
+      });
+    })
+    .fail(function (err) {
+      console.error('ChromeDriver installation failed', err);
+      process.exit(1);
+    });
+  });
 }
-
-downloadUrl = util.format(downloadUrl, helper.version, platform);
-
-var fileName = downloadUrl.split('/').pop();
-
-npmconf.load(function(err, conf) {
-  if (err) {
-    console.log('Error loading npm config');
-    console.error(err);
-    process.exit(1);
-    return;
-  }
-
-  var tmpPath = findSuitableTempDirectory(conf);
-  var downloadedFile = path.join(tmpPath, fileName);
-  var promise = kew.resolve(true);
-
-  // Start the install.
-  promise = promise.then(function () {
-    console.log('Downloading', downloadUrl);
-    console.log('Saving to', downloadedFile);
-    return requestBinary(getRequestOptions(conf), downloadedFile);
-  });
-
-  promise.then(function () {
-    return extractDownload(downloadedFile, tmpPath);
-  })
-  .then(function () {
-    return copyIntoPlace(tmpPath, libPath);
-  })
-  .then(function () {
-    return fixFilePermissions();
-  })
-  .then(function () {
-    console.log('Done. ChromeDriver binary available at', helper.path);
-  })
-  .fail(function (err) {
-    console.error('ChromeDriver installation failed', err);
-    process.exit(1);
-  });
-});
 
 
 function findSuitableTempDirectory(npmConf) {
@@ -102,12 +107,12 @@ function findSuitableTempDirectory(npmConf) {
     }
   }
 
-  console.error('Can not find a writable tmp directory, please report issue on https://github.com/giggio/chromedriver/issues/ with as much information as possible.');
+  console.error('Can not find a writable tmp directory, please report issue on https://github.com/laszlopandy/chromedriver/issues/ with as much information as possible.');
   process.exit(1);
 }
 
 
-function getRequestOptions(conf) {
+function getRequestOptions(conf, downloadUrl) {
   var options = url.parse(downloadUrl);
   var proxyUrl = options.protocol === 'https:' ? conf.get('https-proxy') : conf.get('proxy');
   if (proxyUrl) {
@@ -185,6 +190,7 @@ function requestBinary(requestOptions, filePath) {
       });
 
     } else {
+      console.log(util.inspect(requestOptions));
       client.abort();
       deferred.reject('Error with http request: ' + util.inspect(response.headers));
     }
@@ -194,13 +200,14 @@ function requestBinary(requestOptions, filePath) {
 }
 
 
-function extractDownload(filePath, tmpPath) {
+function extractDownload(filePath) {
   var deferred = kew.defer();
 
-  console.log('Extracting zip contents');
+  var dir = path.dirname(filePath);
+  console.log('Extracting zip contents into', dir);
   try {
     var zip = new AdmZip(filePath);
-    zip.extractAllTo(tmpPath, true);
+    zip.extractAllTo(dir, true);
     deferred.resolve(true);
   } catch (err) {
     deferred.reject('Error extracting archive ' + err.stack);
@@ -212,7 +219,7 @@ function extractDownload(filePath, tmpPath) {
 function copyIntoPlace(tmpPath, targetPath) {
   rimraf(targetPath);
   console.log("Copying to target path", targetPath);
-  fs.mkdirSync(targetPath);
+  mkdirp.sync(targetPath);
 
   // Look for the extracted directory, so we can rename it.
   var files = fs.readdirSync(tmpPath);
@@ -236,15 +243,55 @@ function copyIntoPlace(tmpPath, targetPath) {
 }
 
 
-
-function fixFilePermissions() {
+function fixFilePermissions(filepath) {
   // Check that the binary is user-executable and fix it if it isn't (problems with unzip library)
   if (process.platform != 'win32') {
-    var stat = fs.statSync(helper.path);
+    var stat = fs.statSync(filepath);
     // 64 == 0100 (no octal literal in strict mode)
     if (!(stat.mode & 64)) {
       console.log('Fixing file permissions');
-      fs.chmodSync(helper.path, '755');
+      fs.chmodSync(filepath, '755');
     }
   }
 }
+
+
+function getRequiredVersions() {
+  var versions = Object.keys(process.env).filter(function(key) {
+    return key.startsWith('npm_package_chromedriver_versions_');
+  }).map(function(key) {
+    return process.env[key];
+  });
+  return versions;
+}
+
+
+function getPlatform(version) {
+  var platform = process.platform;
+  var versionTuple = version.split('.').map(function(x) { return parseInt(x); });
+
+  if (platform === 'linux') {
+    if (process.arch === 'x64') {
+      platform += '64';
+    } else {
+      platform += '32';
+    }
+  } else if (platform === 'darwin') {
+    if (versionTuple >= [2, 23]) {
+      if (process.arch === 'x64') {
+        platform = 'mac64';
+      } else {
+        console.log('Only Mac 64 bits supported.');
+        process.exit(1);
+      }
+    }
+    else {
+      platform = 'mac32';
+    }
+  } else if (platform !== 'win32') {
+    console.log('Unexpected platform or architecture:', process.platform, process.arch);
+    process.exit(1);
+  }
+  return platform;
+}
+
