@@ -1,15 +1,15 @@
 {
-  "name": "chromedriver-multi",
-  "version": "1.0.0",
+  "name": "@ricardosouzagrowthx/chromedriver-multi",
+  "version": "1.0.1",
   "keywords": [
     "chromedriver",
     "selenium"
   ],
-  "description": "Download multiple ChromeDriver versions for Selenium",
-  "homepage": "https://github.com/laszlopandy/node-chromedriver",
+  "description": "Download multiple ChromeDriver versions for Selenium, with support for async install.",
+  "homepage": "https://github.com/ricardosouzagrowthx/node-chromedriver",
   "repository": {
     "type": "git",
-    "url": "git://github.com/laszlopandy/node-chromedriver.git"
+    "url": "git://github.com/rickrd/node-chromedriver.git"
   },
   "licenses": [
     {
@@ -17,10 +17,6 @@
       "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
     }
   ],
-  "author": {
-    "name": "Laszlo Pandy",
-    "url": "https://github.com/laszlopandy"
-  },
   "main": "lib/chromedriver",
   "dependencies": {
     "adm-zip": "^0.4.7",

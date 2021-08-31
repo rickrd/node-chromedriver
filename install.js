@@ -28,60 +28,64 @@ exports.installFromEnv = function() {
   exports.install(versions);
 };
 
-exports.install = function(requiredVersions) {
-  console.log("Downloading chromedriver versions", requiredVersions);
+exports.install = async function(requiredVersions) {
+  return new Promise((resolve, reject) => {
+    console.log("Downloading chromedriver versions", requiredVersions);
 
-  npmconf.load(function(err, conf) {
-    if (err) {
-      console.log('Error loading npm config');
-      console.error(err);
-      process.exit(1);
-      return;
-    }
+    npmconf.load(function(err, conf) {
+      if (err) {
+        console.log('Error loading npm config');
+        console.error(err);
+        process.exit(1);
+        return;
+      }
 
-    var tmpPath = findSuitableTempDirectory(conf);
-    var downloadItems = requiredVersions.map(function(version) {
-      var platform = getPlatform(version);
-      var url = util.format(cdnUrl + '/%s/chromedriver_%s.zip', version, platform);
-      var fileName = url.split('/').pop();
-      var versionDir = version.replace(/\./g, '_');
-      var downloadedFile = path.join(tmpPath, versionDir, fileName);
-      var targetPath = helper.getPathForVersion(version);
-      return {
-        url: url,
-        downloadedPath: downloadedFile,
-        targetPath: targetPath
-      };
-    });
-    var promise = kew.resolve(true);
-
-    // Start the install.
-    promise = promise.then(function () {
-      return kew.all(downloadItems.map(function(item) {
-        console.log('Downloading', item.url);
-        console.log('Saving to', item.downloadedPath);
-        var downloadDir = path.dirname(item.downloadedPath);
-        rimraf(downloadDir);
-        mkdirp.sync(downloadDir);
-
-        return kew.resolve(true)
-          .then(function() { return requestBinary(getRequestOptions(conf, item.url), item.downloadedPath); })
-          .then(function() { return extractDownload(item.downloadedPath); })
-          .then(function() { return copyIntoPlace(downloadDir, path.dirname(item.targetPath)); })
-          .then(function() { return fixFilePermissions(item.targetPath); });
-      }));
-    })
-    .then(function () {
-      console.log('Done. ChromeDriver binaries available at:');
-      downloadItems.forEach(function(item) {
-        console.log(' => ' + item.targetPath);
+      var tmpPath = findSuitableTempDirectory(conf);
+      var downloadItems = requiredVersions.map(function(version) {
+        var platform = getPlatform(version);
+        var url = util.format(cdnUrl + '/%s/chromedriver_%s.zip', version, platform);
+        var fileName = url.split('/').pop();
+        var versionDir = version.replace(/\./g, '_');
+        var downloadedFile = path.join(tmpPath, versionDir, fileName);
+        var targetPath = helper.getPathForVersion(version);
+        return {
+          url: url,
+          downloadedPath: downloadedFile,
+          targetPath: targetPath
+        };
       });
-    })
-    .fail(function (err) {
-      console.error('ChromeDriver installation failed', err);
-      process.exit(1);
+      var promise = kew.resolve(true);
+
+      // Start the install.
+      promise = promise.then(function () {
+        return kew.all(downloadItems.map(function(item) {
+          console.log('Downloading', item.url);
+          console.log('Saving to', item.downloadedPath);
+          var downloadDir = path.dirname(item.downloadedPath);
+          rimraf(downloadDir);
+          mkdirp.sync(downloadDir);
+
+          return kew.resolve(true)
+            .then(function() { return requestBinary(getRequestOptions(conf, item.url), item.downloadedPath); })
+            .then(function() { return extractDownload(item.downloadedPath); })
+            .then(function() { return copyIntoPlace(downloadDir, path.dirname(item.targetPath)); })
+            .then(function() { return fixFilePermissions(item.targetPath); });
+        }));
+      })
+      .then(function () {
+        console.log('Done. ChromeDriver binaries available at:');
+        downloadItems.forEach(function(item) {
+          console.log(' => ' + item.targetPath);
+          resolve(item.targetPath)
+        });
+      })
+      .fail(function (err) {
+        console.error('ChromeDriver installation failed', err);
+        process.exit(1);
+        reject(err)
+      });
     });
-  });
+  })
 }
 
 
